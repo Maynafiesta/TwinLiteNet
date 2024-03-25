@@ -3,7 +3,6 @@ import numpy as np
 import shutil
 from tqdm.autonotebook import tqdm
 import os
-import os
 import torch
 from model import TwinLite as net
 import cv2
@@ -12,7 +11,7 @@ import math
 
 def Run( model,img ):
     img = cv2.resize( img, ( 640, 360 ) )
-    img_rs=img.copy()
+    img_rs = img.copy()
 
     img = img[:, :, ::-1].transpose( 2, 0, 1 )
     img = np.ascontiguousarray( img )
@@ -30,8 +29,17 @@ def Run( model,img ):
 
     DA = da_predict.byte().cpu().data.numpy()[0] * 255
     LL = ll_predict.byte().cpu().data.numpy()[0] * 255
-    img_rs[DA>100] = [255,0,0]
-    img_rs[LL>100] = [0,255,0]
+    img_rs[DA > 100] = [255 ,0, 0]
+    img_rs[LL > 100] = [0, 255, 0]
+    
+    daFrame = 255 * np.zeros( shape=img_rs.shape, dtype=np.uint8 )
+    daFrame[DA > 100] = [255, 255, 255]
+    
+    llFrame = 255 * np.zeros( shape=img_rs.shape, dtype=np.uint8 )
+    llFrame[LL > 100] = [255, 255, 255]
+    
+    cv2.imshow( "DrivableArea -- LaneLines", cv2.hconcat([daFrame, llFrame])  )
+    cv2.waitKey( 1 )
     
     return img_rs
 
@@ -65,7 +73,7 @@ while True:
     
     startTime = time.time()
     frameDetected = Run( model,frame )
-    fpsVal = 1.0 / (time.time() - startTime)
+    fpsVal = 1.0 / ( time.time() - startTime )
     frameTimeTagged = cv2.putText( frameDetected, str( fpsVal ), 
                                   ( 50, 50 ), cv2.FONT_HERSHEY_SIMPLEX , 1, 
                                   ( 255, 0, 0 ), 1, cv2.LINE_AA)
