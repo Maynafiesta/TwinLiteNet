@@ -1,14 +1,44 @@
 import torch
 import numpy as np
-import shutil
-from tqdm.autonotebook import tqdm
-import os
-import torch
-from model import TwinLite as net
 import cv2
 import time
-import math
+import threading
+import socket
+import queue
+import pickle
+from model import TwinLite as net
+from tqdm.autonotebook import tqdm
 
+
+class udpVideoStream:
+    def __init__( self ) -> None:
+        self.__hostIp = "192.168.1.14"
+        self.__port = "10005"
+        self.__bufferSize = 65536
+        self.__streamSocket = None
+        self.__hostName = None
+        self.__stopFlag = False
+        self.__frameQueue = queue.Queue( maxsize=10 )
+        self.__streamThread = threading.Thread( target=self.__udpStream )
+
+    def __initSocket( self ):
+        self.__streamSocket = socket.socket( socket.AF_INET, socket.SOCK_DGRAM )
+        self.__streamSocket.setsockopt( socket.SOL_SOCKET, socket.SO_RCVBUF, self.__bufferSize )
+        self.__hostName = socket.gethostname()
+        socketAddr = ( self.__hostIp, self.__port )
+        self.__streamSocket.bind( socketAddr )
+
+    def __stopStream( self ) -> None:
+        self.__stopFlag = True
+        
+    def __udpStream( self ):
+        while not self.__stopFlag:
+            pass
+
+    def sendFrame( self, frame ):
+        self.__frameQueue.put( item=pickle.dumps( frame ), block=True, timeout=1 )
+        
+    
 def Run( model,img ):
     img = cv2.resize( img, ( 640, 360 ) )
     img_rs = img.copy()
@@ -43,44 +73,47 @@ def Run( model,img ):
     
     return img_rs
 
-
-
-model = net.TwinLiteNet()
-model = torch.nn.DataParallel(model)
-model = model.cuda()
-model.load_state_dict(torch.load('pretrained/best.pth'))
-model.eval()
-
-UDP_STREAM_URL = "udpsrc port=5000 " + \
-    "! application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96 " + \
-    "! rtph264depay " + \
-    "! decodebin " + \
-    "! videoconvert " + \
-    "! appsink"
-
-cap = cv2.VideoCapture( UDP_STREAM_URL, cv2.CAP_GSTREAMER )
-
-if not cap.isOpened():
-    print( "Error: Could not open UDP stream." )
-    exit()
-
-while True:
-    ret, frame = cap.read()
+if __name__ == "__main__":
+    videoStreamer = udpVideoStream
+    videoStreamer.mro
     
-    if not ret:
-        print( "Error: Failed to receive frame from UDP stream." )
-        break
-    
-    startTime = time.time()
-    frameDetected = Run( model,frame )
-    fpsVal = 1.0 / ( time.time() - startTime )
-    frameTimeTagged = cv2.putText( frameDetected, str( fpsVal ), 
-                                  ( 50, 50 ), cv2.FONT_HERSHEY_SIMPLEX , 1, 
-                                  ( 255, 0, 0 ), 1, cv2.LINE_AA)
-    cv2.imshow( 'Frame', frameTimeTagged )
+    model = net.TwinLiteNet()
+    model = torch.nn.DataParallel(model)
+    model = model.cuda()
+    model.load_state_dict(torch.load('pretrained/best.pth'))
+    model.eval()
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    UDP_STREAM_URL = "udpsrc port=5000 " + \
+        "! application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96 " + \
+        "! rtph264depay " + \
+        "! decodebin " + \
+        "! videoconvert " + \
+        "! appsink"
 
-cap.release()
-cv2.destroyAllWindows()
+    cap = cv2.VideoCapture( UDP_STREAM_URL, cv2.CAP_GSTREAMER )
+
+    if not cap.isOpened():
+        print( "Error: Could not open UDP stream." )
+        exit()
+
+    while True:
+        ret, frame = cap.read()
+        
+        if not ret:
+            print( "Error: Failed to receive frame from UDP stream." )
+            break
+        
+        startTime = time.time()
+        frameDetected = Run( model,frame )
+        fpsVal = 1.0 / ( time.time() - startTime )
+        frameTimeTagged = cv2.putText( frameDetected, str( fpsVal ), 
+                                    ( 50, 50 ), cv2.FONT_HERSHEY_SIMPLEX , 1, 
+                                    ( 255, 0, 0 ), 1, cv2.LINE_AA)
+        streamQueue.put( frameTimeTagged )
+        # cv2.imshow( 'Frame', frameTimeTagged )
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
