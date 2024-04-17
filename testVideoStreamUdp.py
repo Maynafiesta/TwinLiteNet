@@ -23,8 +23,11 @@ def main():
   # Initialize GStreamer
   Gst.init(None)
 
+  # Create the main loop object
+  loop = GObject.MainLoop()
+  
   # Open video capture with OpenCV
-  cap = cv2.VideoCapture(video_file)
+  cap = cv2.VideoCapture( video_file )
 
   # Check if video capture opened successfully
   if not cap.isOpened():
