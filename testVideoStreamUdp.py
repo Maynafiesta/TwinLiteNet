@@ -1,90 +1,110 @@
+import torch
+import numpy as np
+import shutil
+from tqdm.autonotebook import tqdm
+import os
+import torch
+from model import TwinLite as net
 import cv2
-import gi
+import time
+import math
 
-gi.require_version('Gst', '1.0')
-from gi.repository import GObject, Gst
+def Run( model,img ):
+    img = cv2.resize( img, ( 640, 360 ) )
+    img_rs = img.copy()
 
-# Define the video file path
-video_file = "your_video.mp4"  # Replace with your video file path
+    img = img[:, :, ::-1].transpose( 2, 0, 1 )
+    img = np.ascontiguousarray( img )
+    img = torch.from_numpy( img )
+    img = torch.unsqueeze( img, 0 )  # add a batch dimension
+    img = img.cuda().float() / 255.0
+    img = img.cuda()
+    with torch.no_grad():
+        img_out = model( img )
+    x0=img_out[0]
+    x1=img_out[1]
 
-# Define the target IP address and port
-host = "127.0.0.1"  # Replace with the receiver's IP address
-port = 5000
+    _,da_predict = torch.max( x0, 1 )
+    _,ll_predict = torch.max( x1, 1 )
 
-def gstreamer_pipeline(width, height):
-  return f"appsrc name=source ! videoconvert ! video/x-raw,format=(string)BGR,width={width},height={height} ! x264enc tune=zerolatency speed-preset=ultrafast ! rtph264pay config-interval=10 pt=96 ! udpsink host={host} port={port}"
+    DA = da_predict.byte().cpu().data.numpy()[0] * 255
+    LL = ll_predict.byte().cpu().data.numpy()[0] * 255
+    img_rs[DA > 100] = [255 ,0, 0]
+    img_rs[LL > 100] = [0, 255, 0]
+    
+    daFrame = 255 * np.zeros( shape=img_rs.shape, dtype=np.uint8 )
+    daFrame[DA > 100] = [255, 255, 255]
+    
+    llFrame = 255 * np.zeros( shape=img_rs.shape, dtype=np.uint8 )
+    llFrame[LL > 100] = [255, 255, 255]
+    
+    # cv2.imshow( "DrivableArea -- LaneLines", cv2.hconcat([daFrame, llFrame])  )
+    # cv2.waitKey( 1 )
+    
+    return img_rs
 
-def on_error(bus, msg):
-  err = msg.parse_error()
-  print(f"Error: {err.message}")
-  loop.quit()
 
-def main():
-  # Initialize GStreamer
-  Gst.init(None)
 
-  # Create the main loop object
-  loop = GObject.MainLoop()
-  
-  # Open video capture with OpenCV
-  cap = cv2.VideoCapture( video_file )
+model = net.TwinLiteNet()
+model = torch.nn.DataParallel(model)
+model = model.cuda()
+model.load_state_dict(torch.load('pretrained/best.pth'))
+model.eval()
 
-  # Check if video capture opened successfully
-  if not cap.isOpened():
-    print("Error opening video file!")
-    return
+UDP_LISTENER_URL = "udpsrc port=5000 " + \
+    "! application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96 " + \
+    "! rtph264depay " + \
+    "! decodebin " + \
+    "! videoconvert " + \
+    "! appsink"
 
-  # Get video frame width and height
-  width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-  height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # "! x264enc tune=zerolatency " + \
+UDP_STREMAER_URL = "appsrc " + \
+    "! videoconvert " + \
+    "! rtph264pay " + \
+    "! avdec_h264 " + \
+    "! autovideosink "
+    # "! udpsink host=127.0.0.1 port=5001 "
 
-  # Create the GStreamer pipeline based on video resolution
-  pipeline = gstreamer_pipeline(width, height)
+# "! application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96" + \
+UDP_STREMAER_URL_2 = "appsrc " + \
+    "! video/x-raw, format=BGR, width=634, height=494 " + \
+    "! videoconvert " + \
+    "! x264enc tune=zerolatency " + \
+    "! rtph264pay config-interval=10 pt=96 " + \
+    "! udpsink host=127.0.0.1 port=5001 "
 
-  # Create the GStreamer pipeline object
-  stream = Gst.parse_launch(pipeline)
+cap = cv2.VideoCapture( UDP_LISTENER_URL, cv2.CAP_GSTREAMER )
+writer = cv2.VideoWriter( UDP_STREMAER_URL_2, cv2.CAP_GSTREAMER, 0, 25, ( 634, 494 ) )
+# writer = cv2.VideoWriter( UDP_STREMAER_URL_2, cv2.CAP_GSTREAMER, 0, 25, ( 640, 480 ) )
 
-  # Add a bus watch to catch errors
-  bus = stream.get_bus()
-  bus.add_signal_watch()
-  bus.connect("message", on_error)
+if not cap.isOpened():
+    print( "Error: Could not open UDP listener." )
+    exit()
 
-  # Main loop to capture, encode, and send video frames
-  while True:
-    # Capture frame-by-frame
+if not writer.isOpened():
+    print( "Error: Could not open UDP streamer." )
+    exit()
+
+while True:
     ret, frame = cap.read()
-
-    # Check if frame is read correctly
+    
     if not ret:
-      print("Error reading frame!")
-      break
+        print( "Error: Failed to receive frame from UDP stream." )
+        break
+    
+    startTime = time.time()
+    frameDetected = Run( model,frame )
+    fpsVal = 1.0 / ( time.time() - startTime )
+    frameTimeTagged = cv2.putText( frameDetected, str( fpsVal ), 
+                                  ( 50, 50 ), cv2.FONT_HERSHEY_SIMPLEX , 1, 
+                                  ( 255, 0, 0 ), 1, cv2.LINE_AA)
+    writer.write( frame )
+    # cv2.imshow( 'FramePython', frameTimeTagged )
 
-    # Convert frame to a Gst.Buffer (Optional, might be handled by videoconvert)
-    # buffer = Gst.Buffer.new_allocate(None, len(frame.flatten()), None)
-    # buffer.fill(frame.flatten().astype(np.uint8))
+    # if cv2.waitKey(1) & 0xFF == ord('q'):
+        # break
 
-    # (Optional) Push the frame to the appsrc element (if used)
-    # appsrc = stream.get_by_name("source")
-    # appsrc.push_buffer(buffer)
+cap.release()
+cv2.destroyAllWindows()
 
-    # Start streaming (can be moved outside the loop for continuous streaming)
-    stream.set_state(Gst.State.PLAYING)
-
-    # Process the frame here (if needed)
-
-    # Release the GStreamer buffer (if used)
-    # buffer.unref()
-
-    # Exit loop on 'q' key press
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-      break
-
-    # Stop streaming
-    stream.set_state(Gst.State.NULL)
-
-  # Clean up resources
-  cap.release()
-  Gst.Object.unref(stream)
-
-if __name__ == "__main__":
-  main()
