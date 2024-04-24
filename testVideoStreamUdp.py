@@ -58,25 +58,16 @@ UDP_LISTENER_URL = "udpsrc port=5000 " + \
     "! videoconvert " + \
     "! appsink"
 
-    # "! x264enc tune=zerolatency " + \
 UDP_STREMAER_URL = "appsrc " + \
-    "! videoconvert " + \
-    "! rtph264pay " + \
-    "! avdec_h264 " + \
-    "! autovideosink "
-    # "! udpsink host=127.0.0.1 port=5001 "
-
-# "! application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96" + \
-UDP_STREMAER_URL_2 = "appsrc " + \
-    "! video/x-raw, format=BGR, width=634, height=494 " + \
+    "! video/x-raw, format=BGR, framerate=25/1, width=640, height=480 " + \
+    "! queue " + \
     "! videoconvert " + \
     "! x264enc tune=zerolatency " + \
     "! rtph264pay config-interval=10 pt=96 " + \
     "! udpsink host=127.0.0.1 port=5001 "
 
 cap = cv2.VideoCapture( UDP_LISTENER_URL, cv2.CAP_GSTREAMER )
-writer = cv2.VideoWriter( UDP_STREMAER_URL_2, cv2.CAP_GSTREAMER, 0, 25, ( 634, 494 ) )
-# writer = cv2.VideoWriter( UDP_STREMAER_URL_2, cv2.CAP_GSTREAMER, 0, 25, ( 640, 480 ) )
+writer = cv2.VideoWriter( UDP_STREMAER_URL, cv2.CAP_GSTREAMER, 0, 25, ( 640, 480 ) )
 
 if not cap.isOpened():
     print( "Error: Could not open UDP listener." )
@@ -99,11 +90,13 @@ while True:
     frameTimeTagged = cv2.putText( frameDetected, str( fpsVal ), 
                                   ( 50, 50 ), cv2.FONT_HERSHEY_SIMPLEX , 1, 
                                   ( 255, 0, 0 ), 1, cv2.LINE_AA)
-    writer.write( frame )
-    # cv2.imshow( 'FramePython', frameTimeTagged )
+    frameTimeTagged = cv2.resize( frameTimeTagged, ( 640, 480 ) )
 
-    # if cv2.waitKey(1) & 0xFF == ord('q'):
-        # break
+    writer.write( frameTimeTagged )
+    cv2.imshow( 'FramePython', frameTimeTagged )
+
+    if cv2.waitKey( 1 ) & 0xFF == ord( 'q' ):
+        break
 
 cap.release()
 cv2.destroyAllWindows()
