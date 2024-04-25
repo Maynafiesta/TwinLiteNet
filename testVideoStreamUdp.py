@@ -1,13 +1,9 @@
 import torch
 import numpy as np
-import shutil
-from tqdm.autonotebook import tqdm
-import os
 import torch
 from model import TwinLite as net
 import cv2
 import time
-import math
 
 def Run( model,img ):
     img = cv2.resize( img, ( 640, 360 ) )
@@ -43,61 +39,78 @@ def Run( model,img ):
     
     return img_rs
 
+if __name__ == "__main__":
+        
+    model = net.TwinLiteNet()
+    model = torch.nn.DataParallel( model )
+    model = model.cuda()
+    model.load_state_dict(torch.load( 'pretrained/best.pth' ) )
+    model.eval()
 
+    _WIDTH = 1920
+    _HEIGHT = 512
+    _FPS = 25
 
-model = net.TwinLiteNet()
-model = torch.nn.DataParallel(model)
-model = model.cuda()
-model.load_state_dict(torch.load('pretrained/best.pth'))
-model.eval()
+    UDP_LISTENER_URL = "udpsrc port=5000 " + \
+        "! application/x-rtp, " + \
+            "media=video, clock-rate=90000, encoding-name=H264, payload=96 " + \
+        "! rtph264depay " + \
+        "! decodebin " + \
+        "! videoconvert " + \
+        "! appsink"
 
-UDP_LISTENER_URL = "udpsrc port=5000 " + \
-    "! application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96 " + \
-    "! rtph264depay " + \
-    "! decodebin " + \
-    "! videoconvert " + \
-    "! appsink"
-
-UDP_STREMAER_URL = "appsrc " + \
-    "! video/x-raw, format=BGR, framerate=25/1, width=640, height=480 " + \
-    "! queue " + \
-    "! videoconvert " + \
-    "! x264enc tune=zerolatency " + \
-    "! rtph264pay config-interval=10 pt=96 " + \
-    "! udpsink host=127.0.0.1 port=5001 "
-
-cap = cv2.VideoCapture( UDP_LISTENER_URL, cv2.CAP_GSTREAMER )
-writer = cv2.VideoWriter( UDP_STREMAER_URL, cv2.CAP_GSTREAMER, 0, 25, ( 640, 480 ) )
-
-if not cap.isOpened():
-    print( "Error: Could not open UDP listener." )
-    exit()
-
-if not writer.isOpened():
-    print( "Error: Could not open UDP streamer." )
-    exit()
-
-while True:
-    ret, frame = cap.read()
+    UDP_STREMAER_URL = "appsrc " + \
+        "! video/x-raw " + \
+            ", format=BGR " + \
+            ", framerate=" + str( _FPS ) + "/1 " + \
+            ", width=" + str( _WIDTH ) + " " + \
+            ", height=" + str( _HEIGHT ) + " " + \
+        "! queue " + \
+        "! videoconvert " + \
+        "! x264enc tune=zerolatency " + \
+        "! rtph264pay config-interval=10 pt=96 " + \
+        "! udpsink host=212.1.1.101 port=5002 "
     
-    if not ret:
-        print( "Error: Failed to receive frame from UDP stream." )
-        break
-    
-    startTime = time.time()
-    frameDetected = Run( model,frame )
-    fpsVal = 1.0 / ( time.time() - startTime )
-    frameTimeTagged = cv2.putText( frameDetected, str( fpsVal ), 
-                                  ( 50, 50 ), cv2.FONT_HERSHEY_SIMPLEX , 1, 
-                                  ( 255, 0, 0 ), 1, cv2.LINE_AA)
-    frameTimeTagged = cv2.resize( frameTimeTagged, ( 640, 480 ) )
 
-    writer.write( frameTimeTagged )
-    cv2.imshow( 'FramePython', frameTimeTagged )
 
-    if cv2.waitKey( 1 ) & 0xFF == ord( 'q' ):
-        break
+    # "! udpsink host=127.0.0.1 port=5001 "
+    cap = cv2.VideoCapture( UDP_LISTENER_URL, cv2.CAP_GSTREAMER )
+    writer = cv2.VideoWriter( UDP_STREMAER_URL, cv2.CAP_GSTREAMER, 0, _FPS, ( _WIDTH, _HEIGHT ) )
 
-cap.release()
-cv2.destroyAllWindows()
+    if not cap.isOpened():
+        print( "Error: Could not open UDP listener." )
+        exit()
+
+    if not writer.isOpened():
+        print( "Error: Could not open UDP streamer." )
+        exit()
+
+    while True:
+        ret, frame = cap.read()
+        
+        if not ret:
+            print( "Error: Failed to receive frame from UDP stream." )
+            break
+        
+        startTime = time.time()
+        # Left frame[0:480, 0:640] - Middle = frame[0:480, 640:1280] - Right =  frame[0:480, 1280:1920]
+        frameDetected = cv2.hconcat([ Run( model, frame[0:480, 0:640] ), 
+                                    Run( model, frame[0:480, 640:1280] ),
+                                    Run( model, frame[0:480, 1280:1920] )] )
+        frameDetected = cv2.resize( frameDetected, ( _WIDTH, 512 ) )
+        fpsVal = 1.0 / ( time.time() - startTime )
+        frameTimeTagged = cv2.putText( frameDetected, str( fpsVal ),
+                                    ( 50, 50 ), cv2.FONT_HERSHEY_SIMPLEX , 1,
+                                    ( 255, 0, 0 ), 1, cv2.LINE_AA )
+        writer.write( frameTimeTagged )
+
+        print( "shape: ", frameTimeTagged.shape )
+        cv2.imshow( 'FramePython', frameTimeTagged )
+
+        if cv2.waitKey( 1 ) & 0xFF == ord( 'q' ):
+            break
+
+    cap.release()
+    writer.release()
+    cv2.destroyAllWindows()
 
