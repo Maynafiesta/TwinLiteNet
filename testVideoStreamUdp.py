@@ -50,6 +50,9 @@ if __name__ == "__main__":
     _WIDTH = 1920
     _HEIGHT = 512
     _FPS = 25
+    # _IP_ADDR = "127.0.0.1"
+    _IP_ADDR = "224.1.1.101"
+    _PORT = 5002
 
     UDP_LISTENER_URL = "udpsrc port=5000 " + \
         "! application/x-rtp, " + \
@@ -57,9 +60,15 @@ if __name__ == "__main__":
         "! rtph264depay " + \
         "! decodebin " + \
         "! videoconvert " + \
+        "! videoscale " + \
+        "! videocrop " + \
+            "top=300 " + \
+            "left=0 " + \
+            "right=0 " + \
+            "bottom=300 " + \
         "! appsink"
 
-    UDP_STREMAER_URL = "appsrc " + \
+    UDP_STREAMER_URL = "appsrc " + \
         "! video/x-raw " + \
             ", format=BGR " + \
             ", framerate=" + str( _FPS ) + "/1 " + \
@@ -69,13 +78,10 @@ if __name__ == "__main__":
         "! videoconvert " + \
         "! x264enc tune=zerolatency " + \
         "! rtph264pay config-interval=10 pt=96 " + \
-        "! udpsink host=212.1.1.101 port=5002 "
-    
+        "! udpsink host=" + _IP_ADDR + " port=" + str( _PORT ) + " "
 
-
-    # "! udpsink host=127.0.0.1 port=5001 "
     cap = cv2.VideoCapture( UDP_LISTENER_URL, cv2.CAP_GSTREAMER )
-    writer = cv2.VideoWriter( UDP_STREMAER_URL, cv2.CAP_GSTREAMER, 0, _FPS, ( _WIDTH, _HEIGHT ) )
+    writer = cv2.VideoWriter( UDP_STREAMER_URL, cv2.CAP_GSTREAMER, 0, _FPS, ( _WIDTH, _HEIGHT ) )
 
     if not cap.isOpened():
         print( "Error: Could not open UDP listener." )
@@ -97,18 +103,16 @@ if __name__ == "__main__":
         frameDetected = cv2.hconcat([ Run( model, frame[0:480, 0:640] ), 
                                     Run( model, frame[0:480, 640:1280] ),
                                     Run( model, frame[0:480, 1280:1920] )] )
-        frameDetected = cv2.resize( frameDetected, ( _WIDTH, 512 ) )
+        frameDetected = cv2.resize( frameDetected, ( _WIDTH, _HEIGHT ) )
         fpsVal = 1.0 / ( time.time() - startTime )
         frameTimeTagged = cv2.putText( frameDetected, str( fpsVal ),
                                     ( 50, 50 ), cv2.FONT_HERSHEY_SIMPLEX , 1,
                                     ( 255, 0, 0 ), 1, cv2.LINE_AA )
         writer.write( frameTimeTagged )
 
-        print( "shape: ", frameTimeTagged.shape )
-        cv2.imshow( 'FramePython', frameTimeTagged )
-
-        if cv2.waitKey( 1 ) & 0xFF == ord( 'q' ):
-            break
+        # cv2.imshow( 'FramePython', frameTimeTagged )
+        # if cv2.waitKey( 1 ) & 0xFF == ord( 'q' ):
+        #     break
 
     cap.release()
     writer.release()
